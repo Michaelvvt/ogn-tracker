@@ -1162,6 +1162,7 @@ class GPS_Position: public GPS_Time
      if(RxMsg.isGxGSA())                 return ReadGSA(RxMsg);
      if(RxMsg.isGxRMC()) { calcSatSNR(); return ReadRMC(RxMsg); }
      if(RxMsg.isPGRMZ())                 return ReadPGRMZ(RxMsg); // (pressure) altitude
+     if(RxMsg.isPSTXB())                 return ReadPSTXB(RxMsg); // Stratux baro push: Pa, m/s, °C
      return 0; }
 
    int8_t ReadNMEA(const char *NMEA)
@@ -1194,6 +1195,40 @@ class GPS_Position: public GPS_Time
      if(Unit=='m' || Unit=='M') return 1;
      if(Unit!='f' && Unit!='F') return -1;
      StdAltitude = FeetToMeters(StdAltitude);
+     return 1; }
+
+   // $PSTXB,<pressure_Pa>,<vspeed_mps>,<temperature_C>*<cksum>
+   // Stratux pushes this at 5 Hz over USB-serial so the tracker can broadcast
+   // standard-pressure altitude (and raw pressure/temperature) without needing
+   // its own onboard BMP sensor. Wire units are SI floats; we apply the
+   // appropriate fixed-point scaling here to match the GPS_Position fields.
+   int8_t ReadPSTXB(NMEA_RxMsg &RxMsg)
+   { if(RxMsg.Parms<3) return -2;
+
+     // Param 0: pressure in Pa. Read_Float1 scales by 10 (deci-Pa). Divide
+     // back to Pa before scaling to qPa, and feed Pa to Atmosphere::StdAltitude
+     // which expects Pa and returns 0.1 m (dm) — already the StdAltitude unit.
+     int32_t Pa_x10;
+     int8_t Ret = Read_Float1(Pa_x10, (const char *)(RxMsg.ParmPtr(0)));
+     if(Ret<=0) return -1;
+     int32_t Pa  = Pa_x10 / 10;
+     Pressure    = (uint32_t)(Pa * 4);                    // 0.25 Pa (qPa)
+     StdAltitude = Atmosphere::StdAltitude(Pa);            // 0.1 m   (dm)
+
+     // Param 1: vertical speed in m/s. Read_Float1 scales by 10 → 0.1 m/s,
+     // which is exactly the ClimbRate field's native unit. Best ergonomic
+     // alignment in the whole protocol.
+     int32_t vsp_dm_s;
+     Ret = Read_Float1(vsp_dm_s, (const char *)(RxMsg.ParmPtr(1)));
+     if(Ret>0) ClimbRate = (int16_t)vsp_dm_s;              // 0.1 m/s (dm/s)
+
+     // Param 2: temperature in °C. Read_Float1 scales by 10 → 0.1 °C,
+     // again matching Temperature's native unit.
+     int32_t temp_dC;
+     Ret = Read_Float1(temp_dC, (const char *)(RxMsg.ParmPtr(2)));
+     if(Ret>0) Temperature = (int16_t)temp_dC;             // 0.1 °C  (dC)
+
+     hasBaro = 1;
      return 1; }
 
    int8_t ReadGGA(NMEA_RxMsg &RxMsg)
