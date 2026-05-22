@@ -264,7 +264,7 @@ inline uint8_t NMEA_AppendCheckCRNL(char *NMEA, uint8_t Len) { return NMEA_Appen
        if(Data[4]!='M') return 0;
        return Data[5]=='Z'; }
 
-   uint8_t isPSTXB(void)                         // Stratux baro push: pressure (Pa), vspeed (m/s), temperature (°C)
+   uint8_t isPSTXB(void)                         // Stratux baro push: pressure (Pa), temperature (°C)
      { if(!isP()) return 0;
        if(Data[2]!='S') return 0;
        if(Data[3]!='T') return 0;
